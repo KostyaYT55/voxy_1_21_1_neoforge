@@ -1,0 +1,1993 @@
+Subject: [PATCH] 1.21.1_neoforge
+---
+Index: src/main/resources/voxy.accesswidener
+===================================================================
+diff --git a/src/main/resources/voxy.accesswidener b/src/main/resources/voxy.accesswidener
+deleted file mode 100644
+--- a/src/main/resources/voxy.accesswidener	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ /dev/null	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
+@@ -1,28 +0,0 @@
+-accessWidener v1 named
+-
+-accessible class net/minecraft/client/multiplayer/ClientChunkCache$Storage
+-#accessible class com/mojang/blaze3d/opengl/GlDebug$LogEntry
+-
+-accessible field net/minecraft/client/multiplayer/ClientLevel levelRenderer Lnet/minecraft/client/renderer/LevelRenderer;
+-#accessible field com/mojang/blaze3d/opengl/GlBuffer handle I
+-#accessible field net/minecraft/client/color/block/BlockColors blockColors Lnet/minecraft/core/IdMapper;
+-accessible field net/minecraft/client/renderer/texture/TextureAtlas mipLevel I
+-accessible field net/minecraft/client/gui/components/BossHealthOverlay events Ljava/util/Map;
+-accessible field net/minecraft/client/multiplayer/MultiPlayerGameMode connection Lnet/minecraft/client/multiplayer/ClientPacketListener;
+-
+-accessible field net/minecraft/world/level/chunk/PalettedContainer data Lnet/minecraft/world/level/chunk/PalettedContainer$Data;
+-accessible field net/minecraft/world/level/chunk/PalettedContainer$Data palette Lnet/minecraft/world/level/chunk/Palette;
+-accessible field net/minecraft/world/level/chunk/PalettedContainer$Data storage Lnet/minecraft/util/BitStorage;
+-
+-accessible field net/minecraft/client/renderer/RenderType$CompositeRenderType state Lnet/minecraft/client/renderer/RenderType$CompositeState;
+-accessible field net/minecraft/client/renderer/RenderType$CompositeState textureState Lnet/minecraft/client/renderer/RenderStateShard$EmptyTextureStateShard;
+-accessible method net/minecraft/client/renderer/RenderStateShard$EmptyTextureStateShard cutoutTexture ()Ljava/util/Optional;
+-
+-accessible method net/minecraft/client/renderer/texture/MipmapGenerator alphaBlend (IIIIZ)I
+-accessible method net/minecraft/client/renderer/GameRenderer getFov (Lnet/minecraft/client/Camera;FZ)D
+-
+-accessible method net/minecraft/client/multiplayer/ClientChunkCache$Storage getChunk (I)Lnet/minecraft/world/level/chunk/LevelChunk;
+-accessible method net/minecraft/client/multiplayer/ClientChunkCache$Storage getIndex (II)I
+-
+-accessible field net/minecraft/client/renderer/LightTexture lightTexture Lnet/minecraft/client/renderer/texture/DynamicTexture;
+-accessible field com/mojang/blaze3d/systems/RenderSystem$AutoStorageIndexBuffer name I
+\ No newline at end of file
+Index: src/main/java/me/cortex/voxy/common/config/Serialization.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/common/config/Serialization.java b/src/main/java/me/cortex/voxy/common/config/Serialization.java
+--- a/src/main/java/me/cortex/voxy/common/config/Serialization.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/common/config/Serialization.java	(date 1766836577462)
+@@ -5,14 +5,11 @@
+ import com.google.gson.stream.JsonReader;
+ import com.google.gson.stream.JsonWriter;
+ import me.cortex.voxy.common.Logger;
+-import net.fabricmc.loader.api.FabricLoader;
+ 
+-import java.io.BufferedReader;
+-import java.io.IOException;
+-import java.io.InputStream;
+-import java.io.InputStreamReader;
++import java.io.*;
+ import java.lang.reflect.Method;
+ import java.lang.reflect.Modifier;
++import java.net.URISyntaxException;
+ import java.nio.file.Files;
+ import java.nio.file.Path;
+ import java.util.*;
+@@ -95,9 +92,44 @@
+         Map<Class<?>, GsonConfigSerialization<?>> serializers = new HashMap<>();
+ 
+         Set<String> clazzs = new LinkedHashSet<>();
+-        var path = FabricLoader.getInstance().getModContainer("voxy").get().getRootPaths().get(0);
+-        clazzs.addAll(collectAllClasses(path, BASE_SEARCH_PACKAGE));
+-        clazzs.addAll(collectAllClasses(BASE_SEARCH_PACKAGE));
++        File path = null;
++        // Handle different URI schemes
++        try {
++            java.net.URI uri = Serialization.class.getProtectionDomain().getCodeSource().getLocation().toURI();
++            if (uri.getScheme().equals("file")) {
++                // Direct file URI - could be directory or file
++                path = new File(uri);
++            } else {
++                // Non-file URI (jar:, bundle:, etc.) - check if it's a directory-like URI
++                java.net.URL url = Serialization.class.getProtectionDomain().getCodeSource().getLocation();
++                String urlString = url.toString();
++                if (urlString.endsWith("/") || urlString.contains("!/")) {
++                    // Directory-like URI or JAR with entry - handle differently
++                    // For now, fall back to existing class loader approach
++                    clazzs.addAll(collectAllClasses(BASE_SEARCH_PACKAGE));
++                } else {
++                    // Non-file URI pointing to actual JAR file - copy to temporary file
++                    try (java.io.InputStream is = url.openStream()) {
++                        path = java.io.File.createTempFile("voxy-", ".jar");
++                        path.deleteOnExit(); // Clean up after use
++                        byte[] data = is.readAllBytes();
++                        java.nio.file.Files.write(path.toPath(), data);
++                    }
++                }
++            }
++        } catch (Exception e) {
++            Logger.error("Failed to get code source location, falling back to class loader approach", e);
++            // Fall back to existing class loader approach
++            clazzs.addAll(collectAllClasses(BASE_SEARCH_PACKAGE));
++        }
++        
++        // Only call collectAllClasses with path if path is not null
++        if (path != null) {
++            clazzs.addAll(collectAllClasses(path, BASE_SEARCH_PACKAGE));
++        } else {
++            // Ensure we still call the class loader approach
++            clazzs.addAll(collectAllClasses(BASE_SEARCH_PACKAGE));
++        }
+         int count = 0;
+         outer:
+         for (var clzName : clazzs) {
+@@ -124,7 +156,7 @@
+             try {
+                 var clz = Class.forName(clzName);
+                 if (Modifier.isAbstract(clz.getModifiers())) {
+-                    //Dont want to register abstract classes
++                    //Dont want to register abstract classes as concrete implementations
+                     continue;
+                 }
+                 var original = clz;
+@@ -151,6 +183,11 @@
+                 Logger.error("Error while setting up config serialization", e);
+             }
+         }
++        
++        // Now create GsonConfigSerialization instances for all CONFIG_TYPES (including those added during class scanning)
++        for (var configType : CONFIG_TYPES) {
++            serializers.computeIfAbsent(configType, GsonConfigSerialization::new);
++        }
+ 
+         var builder = new GsonBuilder()
+                 .setPrettyPrinting();
+@@ -166,6 +203,10 @@
+         try {
+             InputStream stream = Serialization.class.getClassLoader()
+                     .getResourceAsStream(pack.replaceAll("[.]", "/"));
++            if (stream == null) {
++                // 资源不存在，返回空列表
++                return List.of();
++            }
+             BufferedReader reader = new BufferedReader(new InputStreamReader(stream));
+             return reader.lines().flatMap(inner -> {
+                 if (inner.endsWith(".class")) {
+@@ -181,22 +222,48 @@
+             return List.of();
+         }
+     }
+-    private static List<String> collectAllClasses(Path base, String pack) {
+-        if (!Files.exists(base.resolve(pack.replaceAll("[.]", "/")))) {
+-            return List.of();
+-        }
++    private static List<String> collectAllClasses(File file, String pack) {
++        List<String> classes = new ArrayList<>();
+         try {
+-            return Files.list(base.resolve(pack.replaceAll("[.]", "/"))).flatMap(inner -> {
+-                if (inner.getFileName().toString().endsWith(".class")) {
+-                    return Stream.of(pack + "." + inner.getFileName().toString().replace(".class", ""));
+-                } else if (Files.isDirectory(inner)) {
+-                    return collectAllClasses(base, pack + "." + inner.getFileName()).stream();
+-                } else {
+-                    return Stream.of();
+-                }
+-            }).collect(Collectors.toList());
++            if (file.isDirectory()) {
++                // Handle directory case
++                Path base = file.toPath();
++                Path packPath = base.resolve(pack.replaceAll("[.]", "/"));
++                if (!Files.exists(packPath)) {
++                    return List.of();
++                }
++                return Files.list(packPath).flatMap(inner -> {
++                    if (inner.getFileName().toString().endsWith(".class")) {
++                        return Stream.of(pack + "." + inner.getFileName().toString().replace(".class", ""));
++                    } else if (Files.isDirectory(inner)) {
++                        return collectAllClasses(file, pack + "." + inner.getFileName()).stream();
++                    } else {
++                        return Stream.of();
++                    }
++                }).collect(Collectors.toList());
++            } else if (file.getName().endsWith(".jar")) {
++                // Handle JAR file case
++                String packPath = pack.replace('.', '/') + '/';
++                try (java.util.jar.JarFile jarFile = new java.util.jar.JarFile(file)) {
++                    java.util.Enumeration<java.util.jar.JarEntry> entries = jarFile.entries();
++                    while (entries.hasMoreElements()) {
++                        java.util.jar.JarEntry entry = entries.nextElement();
++                        String entryName = entry.getName();
++                        // Check if entry is a class file and starts with the package path
++                        if (entryName.endsWith(".class") && entryName.startsWith(packPath)) {
++                            // Convert entry path to fully qualified class name
++                            String className = entryName.substring(0, entryName.length() - 6).replace('/', '.');
++                            classes.add(className);
++                        }
++                    }
++                }
++            }
+         } catch (IOException e) {
+-            throw new RuntimeException(e);
++            Logger.error("Failed to collect classes from " + file + ": " + e.getMessage(), e);
+         }
++        return classes;
++    }
++    private static List<String> collectAllClasses(Path base, String pack) {
++        return collectAllClasses(base.toFile(), pack);
+     }
+ }
+Index: src/main/java/me/cortex/voxy/common/config/compressors/ZSTDCompressor.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/common/config/compressors/ZSTDCompressor.java b/src/main/java/me/cortex/voxy/common/config/compressors/ZSTDCompressor.java
+--- a/src/main/java/me/cortex/voxy/common/config/compressors/ZSTDCompressor.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/common/config/compressors/ZSTDCompressor.java	(date 1766736617398)
+@@ -1,34 +1,16 @@
+ package me.cortex.voxy.common.config.compressors;
+ 
++import com.github.luben.zstd.Zstd;
+ import me.cortex.voxy.common.config.ConfigBuildCtx;
+ import me.cortex.voxy.common.util.MemoryBuffer;
+ import me.cortex.voxy.common.util.ThreadLocalMemoryBuffer;
++import me.cortex.voxy.common.util.UnsafeUtil;
+ import me.cortex.voxy.common.world.SaveLoadSystem;
+ 
+-import static me.cortex.voxy.common.util.GlobalCleaner.CLEANER;
+-import static org.lwjgl.util.zstd.Zstd.*;
++import java.nio.ByteBuffer;
++import java.nio.ByteOrder;
+ 
+ public class ZSTDCompressor implements StorageCompressor {
+-    private record Ref(long ptr) {}
+-
+-    private static Ref createCleanableCompressionContext() {
+-        long ctx = ZSTD_createCCtx();
+-        var ref = new Ref(ctx);
+-        CLEANER.register(ref, ()->ZSTD_freeCCtx(ctx));
+-        return ref;
+-    }
+-
+-    private static Ref createCleanableDecompressionContext() {
+-        long ctx = ZSTD_createDCtx();
+-        nZSTD_DCtx_setParameter(ctx, ZSTD_d_experimentalParam3, 1);//experimental ZSTD_d_forceIgnoreChecksum
+-        var ref = new Ref(ctx);
+-        CLEANER.register(ref, ()->ZSTD_freeDCtx(ctx));
+-        return ref;
+-    }
+-
+-    private static final ThreadLocal<Ref> COMPRESSION_CTX = ThreadLocal.withInitial(ZSTDCompressor::createCleanableCompressionContext);
+-    private static final ThreadLocal<Ref> DECOMPRESSION_CTX = ThreadLocal.withInitial(ZSTDCompressor::createCleanableDecompressionContext);
+-
+     private static final ThreadLocalMemoryBuffer SCRATCH = new ThreadLocalMemoryBuffer(SaveLoadSystem.BIGGEST_SERIALIZED_SECTION_SIZE + 1024);
+ 
+     private final int level;
+@@ -39,22 +21,57 @@
+ 
+     @Override
+     public MemoryBuffer compress(MemoryBuffer saveData) {
+-        MemoryBuffer compressedData = new MemoryBuffer((int)ZSTD_COMPRESSBOUND(saveData.size));
+-        long compressedSize = nZSTD_compressCCtx(COMPRESSION_CTX.get().ptr, compressedData.address, compressedData.size, saveData.address, saveData.size, this.level);
+-        return compressedData.subSize(compressedSize);
++        // 使用zstd-jni的简化API进行压缩
++        // 获取ByteBuffer并设置为小端字节序
++        ByteBuffer inputBuffer = saveData.asByteBuffer().order(ByteOrder.nativeOrder());
++        
++        // 读取数据到byte数组
++        byte[] input = new byte[(int)saveData.size];
++        inputBuffer.get(input);
++        
++        // 压缩数据
++        byte[] compressed = Zstd.compress(input, this.level);
++        
++        // 创建输出MemoryBuffer
++        MemoryBuffer compressedData = new MemoryBuffer(compressed.length);
++        
++        // 获取输出ByteBuffer并设置为小端字节序
++        ByteBuffer outputBuffer = compressedData.asByteBuffer().order(ByteOrder.nativeOrder());
++        outputBuffer.put(compressed);
++        
++        return compressedData;
+     }
+ 
+     @Override
+     public MemoryBuffer decompress(MemoryBuffer saveData) {
+-        var decompressed = SCRATCH.get().createUntrackedUnfreeableReference();
+-        long size = nZSTD_decompressDCtx(DECOMPRESSION_CTX.get().ptr, decompressed.address, decompressed.size, saveData.address, saveData.size);
+-        //TODO:FIXME: DONT ASSUME IT DOESNT FAIL
+-        return decompressed.subSize(size);
++        // 使用zstd-jni的简化API进行解压缩
++        // 获取ByteBuffer并设置为小端字节序
++        ByteBuffer inputBuffer = saveData.asByteBuffer().order(ByteOrder.nativeOrder());
++        
++        // 读取数据到byte数组
++        byte[] input = new byte[(int)saveData.size];
++        inputBuffer.get(input);
++        
++        // 首先获取解压缩后的大小
++        long decompressedSize = Zstd.decompressedSize(input);
++        
++        // 进行解压缩，使用正确的API签名
++        byte[] decompressed = new byte[(int)decompressedSize];
++        Zstd.decompress(decompressed, input);
++        
++        // 创建输出MemoryBuffer
++        MemoryBuffer result = new MemoryBuffer(decompressed.length);
++        
++        // 获取输出ByteBuffer并设置为小端字节序
++        ByteBuffer outputBuffer = result.asByteBuffer().order(ByteOrder.nativeOrder());
++        outputBuffer.put(decompressed);
++        
++        return result;
+     }
+ 
+     @Override
+     public void close() {
+-
++        // zstd-jni不需要显式关闭资源
+     }
+ 
+     public static class Config extends CompressorConfig {
+Index: src/main/java/me/cortex/voxy/client/mixin/sodium/MixinRenderSectionManager.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/mixin/sodium/MixinRenderSectionManager.java b/src/main/java/me/cortex/voxy/client/mixin/sodium/MixinRenderSectionManager.java
+--- a/src/main/java/me/cortex/voxy/client/mixin/sodium/MixinRenderSectionManager.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/mixin/sodium/MixinRenderSectionManager.java	(date 1766484636469)
+@@ -13,7 +13,7 @@
+ import net.caffeinemc.mods.sodium.client.render.chunk.data.BuiltSectionInfo;
+ import net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTrackerHolder;
+ import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.SortBehavior;
+-import net.fabricmc.loader.api.FabricLoader;
++import net.neoforged.fml.ModList;
+ import net.minecraft.client.multiplayer.ClientLevel;
+ import net.minecraft.core.SectionPos;
+ import net.minecraft.world.level.ChunkPos;
+@@ -31,7 +31,7 @@
+ @Mixin(value = RenderSectionManager.class, remap = false)
+ public class MixinRenderSectionManager {
+     @Unique
+-    private static final boolean BOBBY_INSTALLED = FabricLoader.getInstance().isModLoaded("bobby");
++    private static final boolean BOBBY_INSTALLED = ModList.get().isLoaded("bobby");
+ 
+     @Shadow @Final private ClientLevel level;
+ 
+Index: src/main/java/me/cortex/voxy/client/mixin/iris/MixinLevelRenderer.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/mixin/iris/MixinLevelRenderer.java b/src/main/java/me/cortex/voxy/client/mixin/iris/MixinLevelRenderer.java
+--- a/src/main/java/me/cortex/voxy/client/mixin/iris/MixinLevelRenderer.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/mixin/iris/MixinLevelRenderer.java	(date 1766482213671)
+@@ -25,7 +25,7 @@
+ public class MixinLevelRenderer {
+     @Shadow @Final private Minecraft minecraft;
+ 
+-    @Inject(method = "renderLevel", at = @At("HEAD"), order = 100)
++    @Inject(method = "renderLevel", at = @At("HEAD"))
+     private void voxy$injectIrisCompat(
+             DeltaTracker tickCounter,
+             boolean renderBlockOutline,
+Index: src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinFogRenderer.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinFogRenderer.java b/src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinFogRenderer.java
+--- a/src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinFogRenderer.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinFogRenderer.java	(date 1766291538145)
+@@ -1,7 +1,5 @@
+ package me.cortex.voxy.client.mixin.minecraft;
+ 
+-import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
+-import com.llamalad7.mixinextras.sugar.Local;
+ import me.cortex.voxy.client.config.VoxyConfig;
+ import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
+ import net.minecraft.client.Camera;
+Index: src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinLevelRenderer.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinLevelRenderer.java b/src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinLevelRenderer.java
+--- a/src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinLevelRenderer.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinLevelRenderer.java	(date 1766482184275)
+@@ -29,7 +29,7 @@
+         return this.renderer;
+     }
+ 
+-    @Inject(method = "allChanged()V", at = @At("RETURN"), order = 900)//We want to inject before sodium
++    @Inject(method = "allChanged()V", at = @At("RETURN"))//We want to inject before sodium
+     private void reloadVoxyRenderer(CallbackInfo ci) {
+         this.shutdownRenderer();
+         if (this.level != null) {
+Index: src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinClientChunkCache.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinClientChunkCache.java b/src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinClientChunkCache.java
+--- a/src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinClientChunkCache.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinClientChunkCache.java	(date 1766484636469)
+@@ -3,7 +3,7 @@
+ import me.cortex.voxy.client.ICheekyClientChunkCache;
+ import me.cortex.voxy.client.config.VoxyConfig;
+ import me.cortex.voxy.common.world.service.VoxelIngestService;
+-import net.fabricmc.loader.api.FabricLoader;
++import net.neoforged.fml.ModList;
+ import net.minecraft.client.multiplayer.ClientChunkCache;
+ import net.minecraft.world.level.ChunkPos;
+ import net.minecraft.world.level.chunk.LevelChunk;
+@@ -17,7 +17,7 @@
+ @Mixin(ClientChunkCache.class)
+ public class MixinClientChunkCache implements ICheekyClientChunkCache {
+     @Unique
+-    private static final boolean BOBBY_INSTALLED = FabricLoader.getInstance().isModLoaded("bobby");
++    private static final boolean BOBBY_INSTALLED = ModList.get().isLoaded("bobby");
+ 
+     @Shadow volatile ClientChunkCache.Storage storage;
+ 
+Index: src/main/java/me/cortex/voxy/client/mixin/flashback/MixinFlashbackRecorder.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/mixin/flashback/MixinFlashbackRecorder.java b/src/main/java/me/cortex/voxy/client/mixin/flashback/MixinFlashbackRecorder.java
+--- a/src/main/java/me/cortex/voxy/client/mixin/flashback/MixinFlashbackRecorder.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/mixin/flashback/MixinFlashbackRecorder.java	(date 1766237257116)
+@@ -1,29 +1,30 @@
+-package me.cortex.voxy.client.mixin.flashback;
+-
+-import com.moulberry.flashback.record.FlashbackMeta;
+-import com.moulberry.flashback.record.Recorder;
+-import me.cortex.voxy.client.VoxyClientInstance;
+-import me.cortex.voxy.client.compat.IFlashbackMeta;
+-import me.cortex.voxy.commonImpl.VoxyCommon;
+-import net.minecraft.core.RegistryAccess;
+-import org.spongepowered.asm.mixin.Final;
+-import org.spongepowered.asm.mixin.Mixin;
+-import org.spongepowered.asm.mixin.Shadow;
+-import org.spongepowered.asm.mixin.injection.At;
+-import org.spongepowered.asm.mixin.injection.Inject;
+-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+-
+-@Mixin(value = Recorder.class, remap = false)
+-public class MixinFlashbackRecorder {
+-    @Shadow @Final private FlashbackMeta metadata;
+-
+-    @Inject(method = "<init>", at = @At("TAIL"))
+-    private void voxy$getStoragePath(RegistryAccess registryAccess, CallbackInfo retInf) {
+-        if (VoxyCommon.isAvailable()) {
+-            var instance = VoxyCommon.getInstance();
+-            if (instance instanceof VoxyClientInstance ci) {
+-                ((IFlashbackMeta)this.metadata).setVoxyPath(ci.getStorageBasePath().toFile());
+-            }
+-        }
+-    }
+-}
++//forge不存在
++//package me.cortex.voxy.client.mixin.flashback;
++//
++//import com.moulberry.flashback.record.FlashbackMeta;
++//import com.moulberry.flashback.record.Recorder;
++//import me.cortex.voxy.client.VoxyClientInstance;
++//import me.cortex.voxy.client.compat.IFlashbackMeta;
++//import me.cortex.voxy.commonImpl.VoxyCommon;
++//import net.minecraft.core.RegistryAccess;
++//import org.spongepowered.asm.mixin.Final;
++//import org.spongepowered.asm.mixin.Mixin;
++//import org.spongepowered.asm.mixin.Shadow;
++//import org.spongepowered.asm.mixin.injection.At;
++//import org.spongepowered.asm.mixin.injection.Inject;
++//import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
++//
++//@Mixin(value = Recorder.class, remap = false)
++//public class MixinFlashbackRecorder {
++//    @Shadow @Final private FlashbackMeta metadata;
++//
++//    @Inject(method = "<init>", at = @At("TAIL"))
++//    private void voxy$getStoragePath(RegistryAccess registryAccess, CallbackInfo retInf) {
++//        if (VoxyCommon.isAvailable()) {
++//            var instance = VoxyCommon.getInstance();
++//            if (instance instanceof VoxyClientInstance ci) {
++//                ((IFlashbackMeta)this.metadata).setVoxyPath(ci.getStorageBasePath().toFile());
++//            }
++//        }
++//    }
++//}
+Index: src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinRenderSystem.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinRenderSystem.java b/src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinRenderSystem.java
+--- a/src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinRenderSystem.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/mixin/minecraft/MixinRenderSystem.java	(date 1766482200228)
+@@ -15,7 +15,7 @@
+ @Mixin(RenderSystem.class)
+ public class MixinRenderSystem {
+     //We need to inject before iris to initalize our systems
+-    @Inject(method = "initRenderer", order = 900, remap = false, at = @At("RETURN"))
++    @Inject(method = "initRenderer", remap = false, at = @At("RETURN"))
+     private static void voxy$injectInit(int debugVerbosity, boolean sync, CallbackInfo ci) {
+         VoxyClient.initVoxyClient();
+     }
+Index: src/main/java/me/cortex/voxy/client/mixin/flashback/MixinFlashbackMeta.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/mixin/flashback/MixinFlashbackMeta.java b/src/main/java/me/cortex/voxy/client/mixin/flashback/MixinFlashbackMeta.java
+--- a/src/main/java/me/cortex/voxy/client/mixin/flashback/MixinFlashbackMeta.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/mixin/flashback/MixinFlashbackMeta.java	(date 1766475420399)
+@@ -1,4 +1,4 @@
+-package me.cortex.voxy.client.mixin.flashback;
++/*package me.cortex.voxy.client.mixin.flashback;
+ 
+ import com.google.gson.JsonObject;
+ import com.moulberry.flashback.record.FlashbackMeta;
+@@ -43,3 +43,4 @@
+         }
+     }
+ }
++*/
+\ No newline at end of file
+Index: src/main/java/me/cortex/voxy/client/compat/FlashbackCompat.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/compat/FlashbackCompat.java b/src/main/java/me/cortex/voxy/client/compat/FlashbackCompat.java
+--- a/src/main/java/me/cortex/voxy/client/compat/FlashbackCompat.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/compat/FlashbackCompat.java	(date 1766228989108)
+@@ -1,42 +1,43 @@
+-package me.cortex.voxy.client.compat;
+-
+-import com.moulberry.flashback.Flashback;
+-import com.moulberry.flashback.playback.ReplayServer;
+-import com.moulberry.flashback.record.FlashbackMeta;
+-import me.cortex.voxy.common.Logger;
+-import me.cortex.voxy.common.config.section.SectionStorageConfig;
+-import net.fabricmc.loader.api.FabricLoader;
+-import org.apache.commons.logging.Log;
+-
+-import java.nio.file.Path;
+-
+-public class FlashbackCompat {
+-    public static final boolean FLASHBACK_INSTALLED = FabricLoader.getInstance().isModLoaded("flashback");
+-
+-    public static Path getReplayStoragePath() {
+-        if (!FLASHBACK_INSTALLED) {
+-            return null;
+-        }
+-        return getReplayStoragePath0();
+-    }
+-
+-    private static Path getReplayStoragePath0() {
+-        ReplayServer replayServer = Flashback.getReplayServer();
+-        if (replayServer != null) {
+-            FlashbackMeta meta = replayServer.getMetadata();
+-            if (meta != null) {
+-                var path = ((IFlashbackMeta)meta).getVoxyPath();
+-                if (path != null) {
+-                    Logger.info("Flashback replay server exists and meta exists");
+-                    if (path.exists()) {
+-                        Logger.info("Flashback voxy path exists in filesystem, using this as lod data source");
+-                        return path.toPath();
+-                    } else {
+-                        Logger.warn("Flashback meta had voxy path saved but path doesnt exist");
+-                    }
+-                }
+-            }
+-        }
+-        return null;
+-    }
+-}
++//package me.cortex.voxy.client.compat;
++//
++//import com.moulberry.flashback.Flashback;
++//import com.moulberry.flashback.playback.ReplayServer;
++//import com.moulberry.flashback.record.FlashbackMeta;
++//import me.cortex.voxy.common.Logger;
++//import me.cortex.voxy.common.config.section.SectionStorageConfig;
++//import net.fabricmc.loader.api.FabricLoader;
++//import org.apache.commons.logging.Log;
++//
++//import java.nio.file.Path;
++//
++//public class FlashbackCompat {
++//    public static final boolean FLASHBACK_INSTALLED = FabricLoader.getInstance().isModLoaded("flashback");
++//
++//    public static Path getReplayStoragePath() {
++//        if (!FLASHBACK_INSTALLED) {
++//            return null;
++//        }
++//        return getReplayStoragePath0();
++//    }
++//
++//    private static Path getReplayStoragePath0() {
++//        ReplayServer replayServer = Flashback.getReplayServer();
++//        if (replayServer != null) {
++//            FlashbackMeta meta = replayServer.getMetadata();
++//            if (meta != null) {
++//                var path = ((IFlashbackMeta)meta).getVoxyPath();
++//                if (path != null) {
++//                    Logger.info("Flashback replay server exists and meta exists");
++//                    if (path.exists()) {
++//                        Logger.info("Flashback voxy path exists in filesystem, using this as lod data source");
++//                        return path.toPath();
++//                    } else {
++//                        Logger.warn("Flashback meta had voxy path saved but path doesnt exist");
++//                    }
++//                }
++//            }
++//        }
++//        return null;
++//    }
++//}
++//
+\ No newline at end of file
+Index: src/main/java/me/cortex/voxy/client/compat/SodiumExtra.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/compat/SodiumExtra.java b/src/main/java/me/cortex/voxy/client/compat/SodiumExtra.java
+--- a/src/main/java/me/cortex/voxy/client/compat/SodiumExtra.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/compat/SodiumExtra.java	(date 1766229158455)
+@@ -1,9 +1,10 @@
+ package me.cortex.voxy.client.compat;
+ 
+-import net.fabricmc.loader.api.FabricLoader;
++//import net.fabricmc.loader.api.FabricLoader;
++import net.neoforged.fml.ModList;
+ 
+ public class SodiumExtra {
+-    public static final boolean HAS_SODIUM_EXTRA = FabricLoader.getInstance().isModLoaded("sodium-extra");
++    public static final boolean HAS_SODIUM_EXTRA = ModList.get().isLoaded("sodium-extra");
+     public static boolean useSodiumExtraCulling() {
+         return HAS_SODIUM_EXTRA;
+     }
+Index: src/main/java/me/cortex/voxy/client/config/VoxyConfig.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/config/VoxyConfig.java b/src/main/java/me/cortex/voxy/client/config/VoxyConfig.java
+--- a/src/main/java/me/cortex/voxy/client/config/VoxyConfig.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/config/VoxyConfig.java	(date 1766484636469)
+@@ -7,7 +7,7 @@
+ import me.cortex.voxy.common.util.cpu.CpuLayout;
+ import me.cortex.voxy.commonImpl.VoxyCommon;
+ import net.caffeinemc.mods.sodium.client.gui.options.storage.OptionStorage;
+-import net.fabricmc.loader.api.FabricLoader;
++import net.neoforged.fml.loading.FMLPaths;
+ 
+ import java.io.FileReader;
+ import java.io.IOException;
+@@ -70,8 +70,7 @@
+     }
+ 
+     private static Path getConfigPath() {
+-        return FabricLoader.getInstance()
+-                .getConfigDir()
++        return FMLPaths.CONFIGDIR.get()
+                 .resolve("voxy-config.json");
+     }
+ 
+Index: src/main/java/me/cortex/voxy/client/config/ModMenuIntegration.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/config/ModMenuIntegration.java b/src/main/java/me/cortex/voxy/client/config/ModMenuIntegration.java
+--- a/src/main/java/me/cortex/voxy/client/config/ModMenuIntegration.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/config/ModMenuIntegration.java	(date 1766291819006)
+@@ -1,32 +1,32 @@
+-package me.cortex.voxy.client.config;
+-
+-import com.terraformersmc.modmenu.api.ConfigScreenFactory;
+-import com.terraformersmc.modmenu.api.ModMenuApi;
+-import me.cortex.voxy.common.Logger;
+-import me.cortex.voxy.commonImpl.VoxyCommon;
+-import net.caffeinemc.mods.sodium.client.gui.SodiumOptionsGUI;
+-
+-public class ModMenuIntegration implements ModMenuApi {
+-    @Override
+-    public ConfigScreenFactory<?> getModConfigScreenFactory() {
+-        return parent -> {
+-            if (VoxyCommon.isAvailable()) {
+-                var screen = (SodiumOptionsGUI) SodiumOptionsGUI.createScreen(parent);
+-                //Sorry jelly and douira, please dont hurt me
+-                try {
+-                    //We cant use .setPage() as that invokes rebuildGui, however the screen hasnt been initalized yet
+-                    // causing things to crash
+-                    var field = SodiumOptionsGUI.class.getDeclaredField("currentPage");
+-                    field.setAccessible(true);
+-                    field.set(screen, VoxyConfigScreenPages.voxyOptionPage);
+-                    field.setAccessible(false);
+-                } catch (Exception e) {
+-                    Logger.error("Failed to set the current page to voxy", e);
+-                }
+-                return screen;
+-            } else {
+-                return null;
+-            }
+-        };
+-    }
+-}
+\ No newline at end of file
++//package me.cortex.voxy.client.config;
++//
++//import com.terraformersmc.modmenu.api.ConfigScreenFactory;
++//import com.terraformersmc.modmenu.api.ModMenuApi;
++//import me.cortex.voxy.common.Logger;
++//import me.cortex.voxy.commonImpl.VoxyCommon;
++//import net.caffeinemc.mods.sodium.client.gui.SodiumOptionsGUI;
++//
++//public class ModMenuIntegration implements ModMenuApi {
++//    @Override
++//    public ConfigScreenFactory<?> getModConfigScreenFactory() {
++//        return parent -> {
++//            if (VoxyCommon.isAvailable()) {
++//                var screen = (SodiumOptionsGUI) SodiumOptionsGUI.createScreen(parent);
++//                //Sorry jelly and douira, please dont hurt me
++//                try {
++//                    //We cant use .setPage() as that invokes rebuildGui, however the screen hasnt been initalized yet
++//                    // causing things to crash
++//                    var field = SodiumOptionsGUI.class.getDeclaredField("currentPage");
++//                    field.setAccessible(true);
++//                    field.set(screen, VoxyConfigScreenPages.voxyOptionPage);
++//                    field.setAccessible(false);
++//                } catch (Exception e) {
++//                    Logger.error("Failed to set the current page to voxy", e);
++//                }
++//                return screen;
++//            } else {
++//                return null;
++//            }
++//        };
++//    }
++//}
+\ No newline at end of file
+Index: src/main/java/me/cortex/voxy/common/voxelization/WorldConversionFactory.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/common/voxelization/WorldConversionFactory.java b/src/main/java/me/cortex/voxy/common/voxelization/WorldConversionFactory.java
+--- a/src/main/java/me/cortex/voxy/common/voxelization/WorldConversionFactory.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/common/voxelization/WorldConversionFactory.java	(date 1766586432967)
+@@ -4,7 +4,7 @@
+ import me.cortex.voxy.common.world.other.Mapper;
+ import me.cortex.voxy.common.world.other.Mipper;
+ import net.caffeinemc.mods.lithium.common.world.chunk.LithiumHashPalette;
+-import net.fabricmc.loader.api.FabricLoader;
++import net.neoforged.fml.ModList;
+ import net.minecraft.core.Holder;
+ import net.minecraft.util.SimpleBitStorage;
+ import net.minecraft.util.ZeroBitStorage;
+@@ -20,7 +20,7 @@
+ import java.util.WeakHashMap;
+ 
+ public class WorldConversionFactory {
+-    private static final boolean LITHIUM_INSTALLED = FabricLoader.getInstance().isModLoaded("lithium");
++    private static final boolean LITHIUM_INSTALLED = ModList.get().isLoaded("lithium");
+ 
+     private static final class Cache {
+         private final int[] biomeCache = new int[4*4*4];
+@@ -126,12 +126,12 @@
+         var biomes = cache.biomeCache;
+         var data = section.section;
+ 
+-        var vp = blockContainer.data.palette;
++        var vp = blockContainer.data.palette();
+         var pc = cache.getPaletteCache(vp.getSize());
+         GlobalPalette<BlockState> bps = null;
+ 
+         int pcc = 0;
+-        if (blockContainer.data.palette instanceof GlobalPalette<BlockState> _bps) {
++        if (blockContainer.data.palette() instanceof GlobalPalette<BlockState> _bps) {
+             bps = _bps;
+             pcc = bps.getSize();
+         } else {
+@@ -152,7 +152,7 @@
+ 
+ 
+         int nonZeroCnt = 0;
+-        if (blockContainer.data.storage instanceof SimpleBitStorage bStor) {
++        if (blockContainer.data.storage() instanceof SimpleBitStorage bStor) {
+             var bDat = bStor.getRaw();
+             int iterPerLong = (64 / bStor.getBits()) - 1;
+ 
+@@ -180,7 +180,7 @@
+                 data[i] = Mapper.composeMappingId(light, bId, biomes[Integer.compress(i,0b1100_1100_1100)]);
+             }
+         } else {
+-            if (!(blockContainer.data.storage instanceof ZeroBitStorage)) {
++            if (!(blockContainer.data.storage() instanceof ZeroBitStorage)) {
+                 throw new IllegalStateException();
+             }
+             int bId = pc[0];
+Index: src/main/resources/fabric.mod.json
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/resources/fabric.mod.json b/src/main/resources/fabric.mod.json
+--- a/src/main/resources/fabric.mod.json	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/resources/fabric.mod.json	(date 1766472240241)
+@@ -20,9 +20,6 @@
+     "client": [
+       "me.cortex.voxy.client.VoxyClient"
+     ],
+-    "modmenu": [
+-      "me.cortex.voxy.client.config.ModMenuIntegration"
+-    ],
+     "main": [
+       "me.cortex.voxy.commonImpl.VoxyCommon"
+     ]
+Index: src/main/java/me/cortex/voxy/commonImpl/configuration/VoxyConfigStore.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/commonImpl/configuration/VoxyConfigStore.java b/src/main/java/me/cortex/voxy/commonImpl/configuration/VoxyConfigStore.java
+--- a/src/main/java/me/cortex/voxy/commonImpl/configuration/VoxyConfigStore.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/commonImpl/configuration/VoxyConfigStore.java	(date 1766484636489)
+@@ -6,7 +6,7 @@
+ import com.google.gson.stream.JsonWriter;
+ import me.cortex.voxy.common.Logger;
+ import me.cortex.voxy.common.util.MultiGson;
+-import net.fabricmc.loader.api.FabricLoader;
++import net.neoforged.fml.loading.FMLPaths;
+ 
+ import java.io.IOException;
+ import java.lang.reflect.Modifier;
+@@ -110,8 +110,7 @@
+     }
+ 
+     private static Path getConfigPath() {
+-        return FabricLoader.getInstance()
+-                .getConfigDir()
++        return FMLPaths.CONFIGDIR.get()
+                 .resolve("voxy-config.json");
+     }
+ }
+Index: src/main/resources/client.voxy.mixins.json
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/resources/client.voxy.mixins.json b/src/main/resources/client.voxy.mixins.json
+--- a/src/main/resources/client.voxy.mixins.json	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/resources/client.voxy.mixins.json	(date 1766586432906)
+@@ -3,8 +3,6 @@
+   "package": "me.cortex.voxy.client.mixin",
+   "compatibilityLevel": "JAVA_17",
+   "client": [
+-    "flashback.MixinFlashbackMeta",
+-    "flashback.MixinFlashbackRecorder",
+     "iris.CustomUniformsAccessor",
+     "iris.IrisRenderingPipelineAccessor",
+     "iris.MixinIris",
+@@ -16,13 +14,13 @@
+     "iris.MixinProgramSet",
+     "iris.MixinShaderPackSourceNames",
+     "iris.MixinStandardMacros",
+-    // "minecraft.MixinBlockableEventLoop",
++    "minecraft.AccessorEmptyTextureStateShard",
+     "minecraft.MixinClientChunkCache",
+     "minecraft.MixinClientCommonPacketListenerImpl",
+     "minecraft.MixinClientLevel",
+     "minecraft.MixinClientPacketListener",
+     "minecraft.MixinFogRenderer",
+-    // "minecraft.MixinGlDebug",
++    "minecraft.MixinLayerLightSectionStorage",
+     "minecraft.MixinLevelRenderer",
+     "minecraft.MixinMinecraft",
+     "minecraft.MixinRenderSystem",
+@@ -34,8 +32,7 @@
+     "sodium.MixinDefaultChunkRenderer",
+     "sodium.MixinRenderSectionManager",
+     "sodium.MixinSodiumOptionsGUI",
+-    "sodium.MixinSodiumWorldRenderer",
+-    "minecraft.MixinLayerLightSectionStorage"
++    "sodium.MixinSodiumWorldRenderer"
+   ],
+   "injectors": {
+     "defaultRequire": 1
+Index: src/main/java/me/cortex/voxy/commonImpl/VoxyCommon.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/commonImpl/VoxyCommon.java b/src/main/java/me/cortex/voxy/commonImpl/VoxyCommon.java
+--- a/src/main/java/me/cortex/voxy/commonImpl/VoxyCommon.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/commonImpl/VoxyCommon.java	(date 1766661655993)
+@@ -1,39 +1,34 @@
+ package me.cortex.voxy.commonImpl;
+ 
++import lombok.extern.slf4j.Slf4j;
+ import me.cortex.voxy.common.Logger;
+ import me.cortex.voxy.common.config.Serialization;
+-import net.fabricmc.api.EnvType;
+-import net.fabricmc.api.ModInitializer;
+-import net.fabricmc.loader.api.FabricLoader;
+-import net.fabricmc.loader.api.ModContainer;
++import net.neoforged.fml.loading.FMLLoader;
++import net.neoforged.fml.loading.FMLPaths;
+ 
+-public class VoxyCommon implements ModInitializer {
++import java.nio.file.Path;
++
++@Slf4j
++public class VoxyCommon {
+     public static final String MOD_VERSION;
+     public static final boolean IS_DEDICATED_SERVER;
+     public static final boolean IS_IN_MINECRAFT;
+ 
+     static {
+-        ModContainer mod = (ModContainer) FabricLoader.getInstance().getModContainer("voxy").orElse(null);
+-        if (mod == null) {
+-            IS_IN_MINECRAFT = false;
+-            Logger.error("Running voxy without minecraft");
+-            MOD_VERSION = "<UNKNOWN>";
+-            IS_DEDICATED_SERVER = false;
+-        } else {
+-            IS_IN_MINECRAFT = true;
+-            var version = mod.getMetadata().getVersion().getFriendlyString();
+-            var commit = mod.getMetadata().getCustomValue("commit").getAsString();
+-            MOD_VERSION = version + "-" + commit;
+-            IS_DEDICATED_SERVER = FabricLoader.getInstance().getEnvironmentType() == EnvType.SERVER;
+-            Serialization.init();
+-        }
++        IS_IN_MINECRAFT = true;
++        MOD_VERSION = "0.2.7-alpha";
++        IS_DEDICATED_SERVER = FMLLoader.getDist().isDedicatedServer();
++        Serialization.init();
++    }
++
++    public static void init() {
++        // NeoForge initialization
+     }
+ 
+     //This is hardcoded like this because people do not understand what they are doing
+     public static boolean isVerificationFlagOn(String name) {
+         return isVerificationFlagOn(name, false);
+     }
+-
+     public static boolean isVerificationFlagOn(String name, boolean defaultOn) {
+         return System.getProperty("voxy."+name, defaultOn?"true":"false").equals("true");
+     }
+@@ -42,16 +37,12 @@
+         int breakpoint = 0;
+     }
+ 
+-    @Override
+-    public void onInitialize() {
+-
+-    }
+-
+     public interface IInstanceFactory {VoxyInstance create();}
+     private static VoxyInstance INSTANCE;
+     private static IInstanceFactory FACTORY = null;
+ 
+     public static void setInstanceFactory(IInstanceFactory factory) {
++        log.info("Setting instance factory");//, new Throwable());
+         if (FACTORY != null) {
+             throw new IllegalStateException("Cannot set instance factory more than once");
+         }
+Index: src/main/java/me/cortex/voxy/commonImpl/mixin/chunky/MixinFabricWorld.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/commonImpl/mixin/chunky/MixinFabricWorld.java b/src/main/java/me/cortex/voxy/commonImpl/mixin/chunky/MixinFabricWorld.java
+--- a/src/main/java/me/cortex/voxy/commonImpl/mixin/chunky/MixinFabricWorld.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/commonImpl/mixin/chunky/MixinFabricWorld.java	(date 1766816347417)
+@@ -4,21 +4,22 @@
+ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+ import me.cortex.voxy.common.world.service.VoxelIngestService;
+ import net.minecraft.server.level.ChunkResult;
++import net.minecraft.server.level.ServerChunkCache;
+ import net.minecraft.world.level.chunk.ChunkAccess;
+ import net.minecraft.world.level.chunk.LevelChunk;
+ import net.minecraft.world.level.chunk.status.ChunkStatus;
+-import org.popcraft.chunky.mixin.ServerChunkCacheMixin;
+-import org.popcraft.chunky.platform.FabricWorld;
++//import org.popcraft.chunky.mixin.ServerChunkCacheMixin;
++import org.popcraft.chunky.platform.NeoForgeWorld;
+ import org.spongepowered.asm.mixin.Mixin;
+ import org.spongepowered.asm.mixin.injection.At;
+ 
+ import java.util.concurrent.CompletableFuture;
+ 
+-@Mixin(FabricWorld.class)
++@Mixin(NeoForgeWorld.class)
+ public class MixinFabricWorld {
+-    @WrapOperation(method = "getChunkAtAsync", at = @At(value = "INVOKE", target = "Lorg/popcraft/chunky/mixin/ServerChunkCacheMixin;invokeGetChunkFutureMainThread(IILnet/minecraft/world/level/chunk/status/ChunkStatus;Z)Ljava/util/concurrent/CompletableFuture;"))
+-    private CompletableFuture<ChunkResult<ChunkAccess>> captureGeneratedChunk(ServerChunkCacheMixin instance, int i, int j, ChunkStatus chunkStatus, boolean b, Operation<CompletableFuture<ChunkResult<ChunkAccess>>> original) {
+-        var future = original.call(instance, i, j, chunkStatus, b);
++    @WrapOperation(method = "getChunkAtAsync", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerChunkCache;getChunkFutureMainThread(IILnet/minecraft/world/level/chunk/status/ChunkStatus;Z)Ljava/util/concurrent/CompletableFuture;"))
++    private CompletableFuture<ChunkResult<ChunkAccess>> captureGeneratedChunk(ServerChunkCache instance, int x, int z, ChunkStatus t, boolean chunkStatus, Operation<CompletableFuture<ChunkResult<ChunkAccess>>> original) {
++        var future = original.call(instance, x, z,t, chunkStatus);
+         if (false) {//TODO: ADD SERVER CONFIG THING
+             return future;
+         } else {
+Index: src/main/java/me/cortex/voxy/client/core/util/IrisUtil.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/core/util/IrisUtil.java b/src/main/java/me/cortex/voxy/client/core/util/IrisUtil.java
+--- a/src/main/java/me/cortex/voxy/client/core/util/IrisUtil.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/core/util/IrisUtil.java	(date 1766484636487)
+@@ -3,11 +3,12 @@
+ import me.cortex.voxy.client.core.VoxyRenderSystem;
+ import me.cortex.voxy.client.core.rendering.Viewport;
+ import net.caffeinemc.mods.sodium.client.render.chunk.ChunkRenderMatrices;
+-import net.fabricmc.loader.api.FabricLoader;
++
+ import net.irisshaders.iris.Iris;
+ import net.irisshaders.iris.api.v0.IrisApi;
+ import net.irisshaders.iris.gl.IrisRenderSystem;
+ import net.irisshaders.iris.shadows.ShadowRenderer;
++import net.neoforged.fml.ModList;
+ 
+ public class IrisUtil {
+     public record CapturedViewportParameters(ChunkRenderMatrices matrices, double x, double y, double z) {
+@@ -18,7 +19,7 @@
+ 
+     public static CapturedViewportParameters CAPTURED_VIEWPORT_PARAMETERS;
+ 
+-    public static final boolean IRIS_INSTALLED = FabricLoader.getInstance().isModLoaded("iris");
++    public static final boolean IRIS_INSTALLED = ModList.get().isLoaded("iris");
+     public static final boolean SHADER_SUPPORT = true;//System.getProperty("voxy.enableExperimentalIrisPipeline", "false").equalsIgnoreCase("true");
+ 
+ 
+Index: src/main/java/me/cortex/voxy/client/core/model/bakery/BakedBlockEntityModel.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/core/model/bakery/BakedBlockEntityModel.java b/src/main/java/me/cortex/voxy/client/core/model/bakery/BakedBlockEntityModel.java
+--- a/src/main/java/me/cortex/voxy/client/core/model/bakery/BakedBlockEntityModel.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/core/model/bakery/BakedBlockEntityModel.java	(date 1766586432829)
+@@ -1,5 +1,6 @@
+ package me.cortex.voxy.client.core.model.bakery;
+ 
++import me.cortex.voxy.client.mixin.minecraft.AccessorEmptyTextureStateShard;
+ import me.cortex.voxy.common.Logger;
+ import net.minecraft.client.Minecraft;
+ import net.minecraft.client.model.Model;
+@@ -29,7 +30,7 @@
+         for (var layer : this.layers) {
+             if (layer.consumer.isEmpty()) continue;
+             if (layer.layer instanceof RenderType.CompositeRenderType mp) {
+-                ResourceLocation textureId = mp.state.textureState.cutoutTexture().orElse(null);
++                ResourceLocation textureId = ((AccessorEmptyTextureStateShard)mp.state.textureState).voxy$cutoutTexture().orElse(null);
+                 if (textureId == null) {
+                     Logger.error("ERROR: Empty texture id for layer: " + layer);
+                 } else {
+Index: src/main/java/me/cortex/voxy/client/core/rendering/ViewportSelector.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/core/rendering/ViewportSelector.java b/src/main/java/me/cortex/voxy/client/core/rendering/ViewportSelector.java
+--- a/src/main/java/me/cortex/voxy/client/core/rendering/ViewportSelector.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/core/rendering/ViewportSelector.java	(date 1766483777079)
+@@ -1,7 +1,7 @@
+ package me.cortex.voxy.client.core.rendering;
+ 
+ import me.cortex.voxy.client.core.util.IrisUtil;
+-import net.fabricmc.loader.api.FabricLoader;
++import net.neoforged.fml.ModList;
+ import org.vivecraft.api.client.VRRenderingAPI;
+ 
+ import java.util.HashMap;
+@@ -11,7 +11,7 @@
+ import static org.vivecraft.api.client.data.RenderPass.VANILLA;
+ 
+ public class ViewportSelector <T extends Viewport<?>> {
+-    public static final boolean VIVECRAFT_INSTALLED = FabricLoader.getInstance().isModLoaded("vivecraft");
++    public static final boolean VIVECRAFT_INSTALLED = ModList.get().isLoaded("vivecraft");
+ 
+     private final Supplier<T> creator;
+     private final T defaultViewport;
+Index: settings.gradle
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/settings.gradle b/settings.gradle
+--- a/settings.gradle	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/settings.gradle	(date 1766216781440)
+@@ -1,9 +1,21 @@
+ pluginManagement {
+     repositories {
+-        maven {
+-            name = 'Fabric'
+-            url = 'https://maven.fabricmc.net/'
+-        }
+         gradlePluginPortal()
++        maven {
++            name = 'NeoForge'
++            url = 'https://maven.neoforged.net/releases/'
++        }
++        maven {
++            name = 'NeoForge Snapshot'
++            url = 'https://maven.neoforged.net/snapshots/'
++        }
++        maven {
++            name = 'MinecraftForge'
++            url = 'https://maven.minecraftforge.net/'
++        }
+     }
+ }
++
++plugins {
++    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.5.0'
++}
+\ No newline at end of file
+Index: gradle.properties
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>ISO-8859-1
+===================================================================
+diff --git a/gradle.properties b/gradle.properties
+--- a/gradle.properties	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/gradle.properties	(date 1766562925883)
+@@ -1,13 +1,33 @@
+ # Done to increase the memory available to gradle.
+-org.gradle.jvmargs=-Xmx2G
++org.gradle.jvmargs=-Xmx3G -DsocksProxyHost=127.0.0.1 -DsocksProxyPort=7897 -Dnet.minecraftforge.gradle.check.certs=false
++org.gradle.java.home=C:/Users/Administrator/.jdks/azul-21.0.3
++
++#read more on this at https://github.com/neoforged/NeoGradle/blob/NG_7.0/README.md#apply-parchment-mappings
++# you can also find the latest versions at: https://parchmentmc.org/docs/getting-started
++neogradle.subsystems.parchment.minecraftVersion=1.21
++neogradle.subsystems.parchment.mappingsVersion=2024.11.10
+ 
++# Environment Properties
++# You can find the latest versions here: https://projects.neoforged.net/neoforged/neoforge
++# The Minecraft version must agree with the Neo version to get a valid artifact
++minecraft_version=1.21.1
++# The Minecraft version range can use any release version of Minecraft as bounds.
++# Snapshots, pre-releases, and release candidates are not guaranteed to sort properly
++# as they do not follow standard versioning conventions.
++minecraft_version_range=[1.21.1,)
++# The Neo version must agree with the Minecraft version to get a valid artifact
++neo_version=21.1.173
++# The loader version range can only use the major version of FML as bounds
++loader_version_range=[1,)
++
++## Mod Properties
+ org.gradle.caching=true
+ org.gradle.parallel=true
+ org.gradle.daemon = false
+ 
+ # Fabric Properties
+ # check these on https://modmuss50.me/fabric.html
+-minecraft_version=1.21.1
++#minecraft_version=1.21.1
+ loader_version=0.17.2
+ loom_version=1.11-SNAPSHOT
+ 
+@@ -18,4 +38,9 @@
+ # Mod Properties
+ mod_version = 0.2.7-alpha
+ maven_group = me.cortex
+-archives_base_name = voxy
+\ No newline at end of file
++archives_base_name = voxy
++
++mapping_channel=official
++mapping_version=1.21.1
++
++mod_id = voxy
+\ No newline at end of file
+Index: build.gradle
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/build.gradle b/build.gradle
+--- a/build.gradle	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/build.gradle	(date 1766835289054)
+@@ -1,6 +1,8 @@
+ plugins {
+-    id 'fabric-loom' version "1.11-SNAPSHOT"
++    id 'java-library'
++    id 'idea'
+     id 'maven-publish'
++    id 'net.neoforged.gradle.userdev' version '7.1.13'
+ }
+ 
+ def isInGHA = System.getenv("GITHUB_ACTIONS") == "true"
+@@ -24,6 +26,16 @@
+             includeGroup "maven.modrinth"
+         }
+     }
++    exclusiveContent {
++        forRepository {
++            maven {
++                url "https://cursemaven.com"
++            }
++        }
++        filter {
++            includeGroup "curse.maven"
++        }
++    }
+     maven { url = "https://maven.shedaniel.me/" }
+     maven { url = "https://maven.terraformersmc.com/releases/" }
+ 
+@@ -47,6 +59,60 @@
+ }
+ 
+ 
++// Default run configurations.
++// These can be tweaked, removed, or duplicated as needed.
++runs {
++    // applies to all the run configs below
++    configureEach {
++        // Recommended logging data for a userdev environment
++        // The markers can be added/remove as needed separated by commas.
++        // "SCAN": For mods scan.
++        // "REGISTRIES": For firing of registry events.
++        // "REGISTRYDUMP": For getting the contents of all registries.
++        systemProperty 'forge.logging.markers', 'REGISTRIES'
++
++        // Recommended logging level for the console
++        // You can set various levels here.
++        // Please read: https://stackoverflow.com/questions/2031163/when-to-use-the-different-log-levels
++        systemProperty 'forge.logging.console.level', 'debug'
++
++        modSource project.sourceSets.main
++    }
++
++    client {
++        // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
++        systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
++        //增加库到类路径
++        //classpath ""
++    }
++
++    server {
++        systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
++        argument '--nogui'
++    }
++
++    // This run config launches GameTestServer and runs all registered gametests, then exits.
++    // By default, the server will crash when no gametests are provided.
++    // The gametest system is also enabled by default for other run configs under the /test command.
++    gameTestServer {
++        systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
++    }
++
++    data {
++        // example of overriding the workingDirectory set in configureEach above, uncomment if you want to use it
++        // workingDirectory project.file('run-data')
++
++        // Specify the modid for data generation, where to output the resulting resource, and where to look for existing resources.
++        arguments.addAll '--mod', project.mod_id, '--all', '--output', file('src/generated/resources/').getAbsolutePath(), '--existing', file('src/main/resources/').getAbsolutePath()
++    }
++}
++// 启用jarjar系统
++jarJar.enable()
++
++configurations {
++    runtimeClasspath.extendsFrom localRuntime
++}
++
+ def gitCommitHash = { ->
+     try {
+         ExecOutput result = providers.exec {
+@@ -76,11 +142,30 @@
+     filesMatching("fabric.mod.json") {
+         expand "version": version, "commit": hash, "buildtime": time
+     }
+-}
+-
+-loom {
+-    accessWidenerPath = file("src/main/resources/voxy.accesswidener")
++    
++    // NeoForge mod configuration
++    var replaceProperties = [
++            minecraft_version      : project.minecraft_version,
++            minecraft_version_range: project.minecraft_version_range,
++            neo_version            : project.neo_version,
++            loader_version_range   : project.loader_version_range,
++            mod_id                 : project.mod_id,
++            mod_name               : "Voxy",
++            mod_license            : "All-Rights-Reserved",
++            mod_version            : project.version,
++            mod_authors            : "Cortex",
++            mod_description        : "Far distance rendering mod utilising LoDs"
++    ]
++    inputs.properties replaceProperties
++
++    filesMatching(['META-INF/neoforge.mods.toml']) {
++        expand replaceProperties
++    }
+ }
++minecraft.accessTransformers.file rootProject.file('src/main/resources/META-INF/accesstransformer.cfg')
++//loom {
++    //accessWidenerPath = file("src/main/resources/voxy.accesswidener")
++//}
+ 
+ def modRuntimeOnlyMsk = {arg->}
+ if (!isInGHA) {
+@@ -93,55 +178,66 @@
+ 
+ dependencies {
+     // To change the versions see the gradle.properties file
+-    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+-    mappings loom.officialMojangMappings()
+-    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+-
+-
+-    modRuntimeOnlyMsk(fabricApi.module("fabric-api-base", project.fabric_version))
+-    modRuntimeOnlyMsk(fabricApi.module("fabric-rendering-fluids-v1", project.fabric_version))
+-    modRuntimeOnlyMsk(fabricApi.module("fabric-resource-loader-v0", project.fabric_version))
+-    modRuntimeOnlyMsk(fabricApi.module("fabric-command-api-v2", project.fabric_version))
+-
+-    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
++    //minecraft "com.mojang:minecraft:${project.minecraft_version}"
++    //mappings loom.officialMojangMappings()
++    //modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
++//
++//
++    //modRuntimeOnlyMsk(fabricApi.module("fabric-api-base", project.fabric_version))
++    //modRuntimeOnlyMsk(fabricApi.module("fabric-rendering-fluids-v1", project.fabric_version))
++    //modRuntimeOnlyMsk(fabricApi.module("fabric-resource-loader-v0", project.fabric_version))
++    //modRuntimeOnlyMsk(fabricApi.module("fabric-command-api-v2", project.fabric_version))
++//
++    //modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
++    implementation "net.neoforged:neoforge:${neo_version}"
+ 
+     //TODO: this is to eventually not need sodium installed as atm its just used for parsing shaders
+-    modRuntimeOnlyMsk "maven.modrinth:sodium:mc1.21.1-0.6.13-fabric"
+-    modCompileOnly "maven.modrinth:sodium:mc1.21.1-0.6.13-fabric"
++    //modRuntimeOnlyMsk "maven.modrinth:sodium:mc1.21.1-0.6.13-fabric"
++    implementation "curse.maven:sodium-394468:6382651"//modCompileOnly "maven.modrinth:sodium:mc1.21.1-0.6.13-fabric"
++    compileOnly "curse.maven:sodium-394468:6382651"
+ 
+-    modImplementation("maven.modrinth:lithium:mc1.21.1-0.15.0-fabric")
++    implementation "curse.maven:lithium-360438:7246288"//modImplementation("maven.modrinth:lithium:mc1.21.1-0.15.0-fabric")
++    compileOnly "curse.maven:lithium-360438:7246288"
+ 
+-    modRuntimeOnlyMsk "drouarb:nvidium:0.4.1-beta9:1.21-1.21.1@jar"
+-    modCompileOnly "drouarb:nvidium:0.4.1-beta9:1.21-1.21.1@jar"
++    //modRuntimeOnlyMsk "drouarb:nvidium:0.4.1-beta9:1.21-1.21.1@jar"
++    //modCompileOnly "drouarb:nvidium:0.4.1-beta9:1.21-1.21.1@jar"
+ 
+-    modCompileOnly("maven.modrinth:modmenu:11.0.3")
+-    modRuntimeOnlyMsk("maven.modrinth:modmenu:11.0.3")
++    implementation "curse.maven:irisshaders-455508:6661598"
++    compileOnly "curse.maven:irisshaders-455508:6661598"
+ 
+-    modCompileOnly("maven.modrinth:iris:1.8.8+1.21.1-fabric")
+-    modRuntimeOnlyMsk("maven.modrinth:iris:1.8.8+1.21.1-fabric")
++    //modCompileOnly("maven.modrinth:modmenu:11.0.3")
++    //modRuntimeOnlyMsk("maven.modrinth:modmenu:11.0.3")
++
++    //modCompileOnly("maven.modrinth:iris:1.8.8+1.21.1-fabric")
++    //modRuntimeOnlyMsk("maven.modrinth:iris:1.8.8+1.21.1-fabric")
+     // iris needs these for some reason
+-    modRuntimeOnlyMsk("io.github.douira:glsl-transformer:2.0.1")
+-    modRuntimeOnlyMsk("org.anarres:jcpp:1.4.14")
++    //modRuntimeOnlyMsk("io.github.douira:glsl-transformer:2.0.1")
++    //modRuntimeOnlyMsk("org.anarres:jcpp:1.4.14")
+ 
+     //modCompileOnly("maven.modrinth:starlight:1.1.3+1.20.4")
+ 
+     //modCompileOnly("maven.modrinth:immersiveportals:v5.1.7-mc1.20.4")
+ 
+-    modCompileOnly("maven.modrinth:sodium-extra:mc1.21.1-0.6.0+fabric")
+-    modRuntimeOnlyMsk("maven.modrinth:sodium-extra:mc1.21.1-0.6.0+fabric")
++    //modCompileOnly("maven.modrinth:sodium-extra:mc1.21.1-0.6.0+fabric")
++    //modRuntimeOnlyMsk("maven.modrinth:sodium-extra:mc1.21.1-0.6.0+fabric")
+ 
+-    modCompileOnly("maven.modrinth:chunky:1.4.23-fabric")
+-    modRuntimeOnlyMsk("maven.modrinth:chunky:1.4.23-fabric")
++    implementation "curse.maven:chunky-pregenerator-forge-485681:6383261"//modCompileOnly("maven.modrinth:chunky:1.4.23-fabric")
++    //modRuntimeOnlyMsk("maven.modrinth:chunky:1.4.23-fabric")
+ 
+-    modRuntimeOnlyMsk("maven.modrinth:spark:1.10.152-fabric")
+-    modRuntimeOnlyMsk("maven.modrinth:fabric-permissions-api:0.3.3")
++    //modRuntimeOnlyMsk("maven.modrinth:spark:1.10.152-fabric")
++    //modRuntimeOnlyMsk("maven.modrinth:fabric-permissions-api:0.3.3")
+     //modRuntimeOnly("maven.modrinth:nsight-loader:1.2.0")
+ 
+     //modImplementation('io.github.douira:glsl-transformer:2.0.1')
+ 
+-    modCompileOnly("maven.modrinth:vivecraft:1.21.9-1.3.2-fabric")
++    implementation "curse.maven:vivecraft-667903:7187450"//modCompileOnly("maven.modrinth:vivecraft:1.21.9-1.3.2-fabric")
++
++    //modImplementation("maven.modrinth:flashback:rNCr1Rbs")
++    compileOnly("maven.modrinth:nvidium-neoforge:1vMc0Kcf")
+ 
+-    modCompileOnly("maven.modrinth:flashback:rNCr1Rbs")
++    annotationProcessor 'org.projectlombok:lombok:1.18.42'
++    implementation 'org.projectlombok:lombok:1.18.42'
++
+ }
+ 
+ 
+@@ -154,14 +250,8 @@
+ 
+ java {
+     def javaVersion = JavaVersion.toVersion(targetJavaVersion)
+-    if (JavaVersion.current() < javaVersion) {
+-        toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+-    }
+-
+-    // Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task
+-    // if it is present.
+-    // If you remove this line, sources will not be generated.
+-
++    // Always configure the toolchain for NeoGradle compatibility
++    toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+ 
+     //withSourcesJar()
+ }
+@@ -174,52 +264,19 @@
+ 
+ 
+ 
+-tasks.register('makeExcludedRocksDB', Zip) {
+-    archiveExtension.set("jar")
+-    entryCompression = ZipEntryCompression.STORED
+-    destinationDirectory.set temporaryDir
+-
+-    dependsOn configurations.includeInternal
+-
+-    def files = configurations.includeInternal.incoming.getArtifacts().getArtifactFiles().filter {
+-        it.name.startsWith('rocksdb')
+-    }
+-    
+-    from {->zipTree(files.first())}
+-    archiveFileName.set(providers.provider{files.first().name})
++// jarjar任务配置
++jarJar {
++    // 配置jarjar任务的基本设置
++    // 依赖排除通过main dependencies块中的jarJar配置处理
++}
+ 
+-    exclude {
+-        def file = it.name
+-        if (file.endsWith(".jnilib")) {
+-            return true
+-        }
+-        if (!file.endsWith(".so")) {
+-            return false
+-        }
+-        return ["osx", "linux32", "musl", "s390x", "riscv64", "ppc64le", "aarch64"].any(file::contains)
++jar {
++    from("LICENSE") {
++        rename { "${it}_${project.archives_base_name}" } 
+     }
+ }
+ 
+-processIncludeJars {
+-    outputs.cacheIf {true}
+-
+-    dependsOn makeExcludedRocksDB
+-    jars = jars.filter {!it.name.startsWith('rocksdb')}
+-    jars.from(makeExcludedRocksDB)
+-}
+-
+-remapJar {
+-    doFirst {
+-        delete fileTree(getDestinationDirectory().get())
+-    }
+-
+-    if (!isInGHA) {
+-        def hash = gitCommitHash();
+-        if (!hash.equals("<UnknownCommit>")) {
+-            archiveClassifier.set(hash);
+-        }
+-    }
+-}
++// NeoForge handles reobfuscation automatically, no need for explicit reobfJar configuration
+ 
+ project.ext.lwjglVersion = "3.3.3"
+ project.ext.lwjglNatives = "natives-windows"
+@@ -233,42 +290,70 @@
+     implementation platform("org.lwjgl:lwjgl-bom:$lwjglVersion")
+ 
+     implementation "org.lwjgl:lwjgl"
+-    include(implementation "org.lwjgl:lwjgl-lmdb")
+-    include(implementation "org.lwjgl:lwjgl-zstd")
++    implementation "org.lwjgl:lwjgl-lmdb"
++    implementation "org.lwjgl:lwjgl-zstd"
+     runtimeOnly "org.lwjgl:lwjgl:$lwjglVersion:natives-windows"
+     runtimeOnly "org.lwjgl:lwjgl:$lwjglVersion:natives-linux"
+-    include(runtimeOnly "org.lwjgl:lwjgl-lmdb:$lwjglVersion:natives-windows")
+-    include(runtimeOnly "org.lwjgl:lwjgl-zstd:$lwjglVersion:natives-windows")
+-    include(runtimeOnly "org.lwjgl:lwjgl-lmdb:$lwjglVersion:natives-linux")
+-    include(runtimeOnly "org.lwjgl:lwjgl-zstd:$lwjglVersion:natives-linux")
++    runtimeOnly "org.lwjgl:lwjgl-lmdb:$lwjglVersion:natives-windows"
++    runtimeOnly "org.lwjgl:lwjgl-zstd:$lwjglVersion:natives-windows"
++    runtimeOnly "org.lwjgl:lwjgl-lmdb:$lwjglVersion:natives-linux"
++    runtimeOnly "org.lwjgl:lwjgl-zstd:$lwjglVersion:natives-linux"
++    
++    // 使用更可靠的zstd-jni库来替代LWJGL Zstd，避免本地库加载问题
++    // 这个库自动处理不同平台的本地库，使用更简单的API
++    implementation "com.github.luben:zstd-jni:1.5.5-1"
++    jarJar "com.github.luben:zstd-jni:1.5.5-1"
+ 
+-    include(implementation 'redis.clients:jedis:5.1.0')
+-    include(implementation('org.rocksdb:rocksdbjni:10.2.1'))
+-    include(implementation 'org.apache.commons:commons-pool2:2.12.0')
+-    include(implementation 'org.lz4:lz4-java:1.8.0')
+-    include(implementation('org.tukaani:xz:1.10'))
++    // Add these to jarjar configuration for jar-in-jar
++    // 使用NeoForged推荐的jarjar语法，合并implementation和jarjar配置
++    jarJar(implementation(group: 'redis.clients', name: 'jedis') {
++        version {
++            strictly '[5.0.0,6.0.0)' // 限制版本范围，确保兼容性
++            prefer '5.1.0' // 首选版本
++        }
++        // 从jedis依赖中排除lz4-java，因为rocksdbjni已经包含
++        exclude group: 'org.lz4', module: 'lz4-java'
++    })
++    
++    jarJar(implementation(group: 'org.rocksdb', name: 'rocksdbjni') {
++        version {
++            strictly '[10.0.0,11.0.0)' // 限制版本范围，确保兼容性
++            prefer '10.2.1' // 首选版本
++        }
++    })
++    
++    jarJar(implementation(group: 'org.apache.commons', name: 'commons-pool2') {
++        version {
++            strictly '[2.0.0,3.0.0)' // 限制版本范围，确保兼容性
++            prefer '2.12.0' // 首选版本
++        }
++    })
++    
++    // 移除单独的lz4-java依赖，因为rocksdbjni已经包含
++    /*
++    jarJar(implementation(group: 'org.lz4', name: 'lz4-java') {
++        version {
++            strictly '[1.8.0,2.0.0)' // 限制版本范围，确保兼容性
++            prefer '1.8.0' // 首选版本
++        }
++    })
++    */
++    
++    jarJar(implementation(group: 'org.tukaani', name: 'xz') {
++        version {
++            strictly '[1.0.0,2.0.0)' // 限制版本范围，确保兼容性
++            prefer '1.10' // 首选版本
++        }
++    })
+ 
+     if (true) {
+         if (!isInGHA) {
+-            minecraftRuntimeLibraries('org.xerial:sqlite-jdbc:3.49.1.0')
++            // NeoForge uses different approach for runtime libraries
++            implementation 'org.xerial:sqlite-jdbc:3.49.1.0'
+         }
+     } else {
+-        include(implementation('org.xerial:sqlite-jdbc:3.49.1.0'))
++        implementation 'org.xerial:sqlite-jdbc:3.49.1.0'
+     }
+-    //implementation 'org.rocksdb:rocksdbjni:8.10.0'
+-    //implementation 'redis.clients:jedis:5.1.0'
+ }
+ 
+-if (!isInGHA) {
+-    repositories {
+-        maven {
+-            url = "https://pkgs.dev.azure.com/djtheredstoner/DevAuth/_packaging/public/maven/v1"
+-        }
+-    }
+-
+-    dependencies {
+-        modRuntimeOnly('me.djtheredstoner:DevAuth-fabric:1.1.0') {
+-            exclude group: 'net.fabricmc', module: 'fabric-loader'
+-        }
+-    }
+-}
+\ No newline at end of file
++// DevAuth is Fabric-specific, removed for NeoForge compatibility
+\ No newline at end of file
+Index: src/main/java/me/cortex/voxy/client/VoxyClientInstance.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/VoxyClientInstance.java b/src/main/java/me/cortex/voxy/client/VoxyClientInstance.java
+--- a/src/main/java/me/cortex/voxy/client/VoxyClientInstance.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/VoxyClientInstance.java	(date 1766484927767)
+@@ -1,6 +1,6 @@
+ package me.cortex.voxy.client;
+ 
+-import me.cortex.voxy.client.compat.FlashbackCompat;
++
+ import me.cortex.voxy.client.config.VoxyConfig;
+ import me.cortex.voxy.client.mixin.sodium.AccessorSodiumWorldRenderer;
+ import me.cortex.voxy.common.Logger;
+@@ -29,11 +29,8 @@
+     private final boolean noIngestOverride;
+     public VoxyClientInstance() {
+         super();
+-        var path = FlashbackCompat.getReplayStoragePath();
+-        this.noIngestOverride = path != null;
+-        if (path == null) {
+-            path = getBasePath();
+-        }
++        var path = getBasePath();
++        this.noIngestOverride = false;
+         this.basePath = path;
+         this.storageConfig = getCreateStorageConfig(path);
+         this.updateDedicatedThreads();
+Index: src/main/java/me/cortex/voxy/client/VoxyCommands.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/VoxyCommands.java b/src/main/java/me/cortex/voxy/client/VoxyCommands.java
+--- a/src/main/java/me/cortex/voxy/client/VoxyCommands.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/VoxyCommands.java	(date 1766836812279)
+@@ -1,67 +1,84 @@
+ package me.cortex.voxy.client;
+ 
++import com.mojang.brigadier.arguments.ArgumentType;
+ import com.mojang.brigadier.arguments.StringArgumentType;
+ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+ import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.suggestion.Suggestions;
+ import com.mojang.brigadier.suggestion.SuggestionsBuilder;
++import lombok.extern.slf4j.Slf4j;
+ import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
+ import me.cortex.voxy.commonImpl.VoxyCommon;
+ import me.cortex.voxy.commonImpl.WorldIdentifier;
+ import me.cortex.voxy.commonImpl.importers.DHImporter;
+ import me.cortex.voxy.commonImpl.importers.WorldImporter;
+-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+-import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
++import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.builder.LiteralArgumentBuilder;
++import com.mojang.brigadier.builder.RequiredArgumentBuilder;
++import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
+ import net.minecraft.client.Minecraft;
+ import net.minecraft.commands.SharedSuggestionProvider;
+ import net.minecraft.network.chat.Component;
++import net.minecraft.commands.CommandSourceStack;
+ import java.io.File;
+ import java.io.IOException;
+ import java.nio.file.Files;
+ import java.nio.file.Path;
+ import java.util.concurrent.CompletableFuture;
+ 
+-
++@Slf4j
+ public class VoxyCommands {
+ 
+-    public static LiteralArgumentBuilder<FabricClientCommandSource> register() {
+-        var imports = ClientCommandManager.literal("import")
+-                .then(ClientCommandManager.literal("world")
+-                        .then(ClientCommandManager.argument("world_name", StringArgumentType.string())
+-                                .suggests(VoxyCommands::importWorldSuggester)
+-                                .executes(VoxyCommands::importWorld)))
+-                .then(ClientCommandManager.literal("bobby")
+-                        .then(ClientCommandManager.argument("world_name", StringArgumentType.string())
+-                                .suggests(VoxyCommands::importBobbySuggester)
+-                                .executes(VoxyCommands::importBobby)))
+-                .then(ClientCommandManager.literal("raw")
+-                        .then(ClientCommandManager.argument("path", StringArgumentType.string())
+-                                .executes(VoxyCommands::importRaw)))
+-                .then(ClientCommandManager.literal("zip")
+-                        .then(ClientCommandManager.argument("zipPath", StringArgumentType.string())
+-                                .executes(VoxyCommands::importZip)
+-                                .then(ClientCommandManager.argument("innerPath", StringArgumentType.string())
+-                                        .executes(VoxyCommands::importZip))))
+-                .then(ClientCommandManager.literal("cancel")
+-                        .executes(VoxyCommands::cancelImport));
++    public static void register(RegisterClientCommandsEvent event) {
++
++        CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
++        
++        LiteralArgumentBuilder<CommandSourceStack> voxyCommand = LiteralArgumentBuilder.literal("voxy");
++        
++        voxyCommand.then(LiteralArgumentBuilder.<CommandSourceStack>literal("reload")
++                .executes(VoxyCommands::reloadInstance));
++        
++        LiteralArgumentBuilder<CommandSourceStack> importCommand = LiteralArgumentBuilder.literal("import");
++
++        importCommand.then(LiteralArgumentBuilder.<CommandSourceStack>literal("world")
++                .then(RequiredArgumentBuilder.<CommandSourceStack, String>argument("world_name", StringArgumentType.string())
++                        .suggests(VoxyCommands::importWorldSuggester)
++                        .executes(VoxyCommands::importWorld)));
++
++        importCommand.then(LiteralArgumentBuilder.<CommandSourceStack>literal("bobby")
++                .then(RequiredArgumentBuilder.<CommandSourceStack, String>argument("world_name", StringArgumentType.string())
++                        .suggests(VoxyCommands::importBobbySuggester)
++                        .executes(VoxyCommands::importBobby)));
++
++        importCommand.then(LiteralArgumentBuilder.<CommandSourceStack>literal("raw")
++                .then(RequiredArgumentBuilder.<CommandSourceStack, String>argument("path", StringArgumentType.string())
++                        .executes(VoxyCommands::importRaw)));
++        
++        importCommand.then(LiteralArgumentBuilder.<CommandSourceStack>literal("zip")
++                .then(RequiredArgumentBuilder.<CommandSourceStack, String>argument("zipPath", StringArgumentType.string())
++                        .executes(VoxyCommands::importZip)
++                        .then(RequiredArgumentBuilder.<CommandSourceStack, String>argument("innerPath", StringArgumentType.string())
++                                .executes(VoxyCommands::importZip))));
++        
++        importCommand.then(LiteralArgumentBuilder.<CommandSourceStack>literal("cancel")
++                .executes(VoxyCommands::cancelImport));
+ 
+         if (DHImporter.HasRequiredLibraries) {
+-            imports = imports
+-                    .then(ClientCommandManager.literal("distant_horizons")
+-                    .then(ClientCommandManager.argument("sqlDbPath", StringArgumentType.string())
++            importCommand = importCommand
++                    .then(LiteralArgumentBuilder.<CommandSourceStack>literal("distant_horizons")
++                    .then(RequiredArgumentBuilder.<CommandSourceStack, String>argument("sqlDbPath", StringArgumentType.string())
+                             .executes(VoxyCommands::importDistantHorizons)));
+         }
+-
+-        return ClientCommandManager.literal("voxy")//.requires((ctx)-> VoxyCommon.getInstance() != null)
+-                .then(ClientCommandManager.literal("reload")
+-                        .executes(VoxyCommands::reloadInstance))
+-                .then(imports);
++        
++        voxyCommand.then(importCommand);
++        
++        dispatcher.register(voxyCommand);
+     }
+ 
+-    private static int reloadInstance(CommandContext<FabricClientCommandSource> ctx) {
++    private static int reloadInstance(CommandContext<CommandSourceStack> ctx) {
+         var instance = (VoxyClientInstance)VoxyCommon.getInstance();
+         if (instance == null) {
+-            ctx.getSource().sendError(Component.translatable("Voxy must be enabled in settings to use this"));
++            ctx.getSource().sendFailure(Component.translatable("Voxy must be enabled in settings to use this"));
+             return 1;
+         }
+         var wr = Minecraft.getInstance().levelRenderer;
+@@ -81,10 +98,10 @@
+ 
+ 
+ 
+-    private static int importDistantHorizons(CommandContext<FabricClientCommandSource> ctx) {
++    private static int importDistantHorizons(CommandContext<CommandSourceStack> ctx) {
+         var instance = (VoxyClientInstance)VoxyCommon.getInstance();
+         if (instance == null) {
+-            ctx.getSource().sendError(Component.translatable("Voxy must be enabled in settings to use this"));
++            ctx.getSource().sendFailure(Component.translatable("Voxy must be enabled in settings to use this"));
+             return 1;
+         }
+         var dbFile = new File(ctx.getArgument("sqlDbPath", String.class));
+@@ -120,18 +137,18 @@
+         });
+     }
+ 
+-    private static int importRaw(CommandContext<FabricClientCommandSource> ctx) {
++    private static int importRaw(CommandContext<CommandSourceStack> ctx) {
+         if (VoxyCommon.getInstance() == null) {
+-            ctx.getSource().sendError(Component.translatable("Voxy must be enabled in settings to use this"));
++            ctx.getSource().sendFailure(Component.translatable("Voxy must be enabled in settings to use this"));
+             return 1;
+         }
+ 
+         return fileBasedImporter(new File(ctx.getArgument("path", String.class)))?0:1;
+     }
+ 
+-    private static int importBobby(CommandContext<FabricClientCommandSource> ctx) {
++    private static int importBobby(CommandContext<CommandSourceStack> ctx) {
+         if (VoxyCommon.getInstance() == null) {
+-            ctx.getSource().sendError(Component.translatable("Voxy must be enabled in settings to use this"));
++            ctx.getSource().sendFailure(Component.translatable("Voxy must be enabled in settings to use this"));
+             return 1;
+         }
+ 
+@@ -139,10 +156,10 @@
+         return fileBasedImporter(file)?0:1;
+     }
+ 
+-    private static CompletableFuture<Suggestions> importWorldSuggester(CommandContext<FabricClientCommandSource> ctx, SuggestionsBuilder sb) {
++    private static CompletableFuture<Suggestions> importWorldSuggester(CommandContext<CommandSourceStack> ctx, SuggestionsBuilder sb) {
+         return fileDirectorySuggester(Minecraft.getInstance().gameDirectory.toPath().resolve("saves"), sb);
+     }
+-    private static CompletableFuture<Suggestions> importBobbySuggester(CommandContext<FabricClientCommandSource> ctx, SuggestionsBuilder sb) {
++    private static CompletableFuture<Suggestions> importBobbySuggester(CommandContext<CommandSourceStack> ctx, SuggestionsBuilder sb) {
+         return fileDirectorySuggester(Minecraft.getInstance().gameDirectory.toPath().resolve(".bobby"), sb);
+     }
+ 
+@@ -188,9 +205,9 @@
+         return sb.buildFuture();
+     }
+ 
+-    private static int importWorld(CommandContext<FabricClientCommandSource> ctx) {
++    private static int importWorld(CommandContext<CommandSourceStack> ctx) {
+         if (VoxyCommon.getInstance() == null) {
+-            ctx.getSource().sendError(Component.translatable("Voxy must be enabled in settings to use this"));
++            ctx.getSource().sendFailure(Component.translatable("Voxy must be enabled in settings to use this"));
+             return 1;
+         }
+ 
+@@ -206,7 +223,7 @@
+         return fileBasedImporter(file.toFile())?0:1;
+     }
+ 
+-    private static int importZip(CommandContext<FabricClientCommandSource> ctx) {
++    private static int importZip(CommandContext<CommandSourceStack> ctx) {
+         var zip =  new File(ctx.getArgument("zipPath", String.class));
+         var innerDir = "region/";
+         try {
+@@ -215,7 +232,7 @@
+ 
+         var instance = (VoxyClientInstance)VoxyCommon.getInstance();
+         if (instance == null) {
+-            ctx.getSource().sendError(Component.translatable("Voxy must be enabled in settings to use this"));
++            ctx.getSource().sendFailure(Component.translatable("Voxy must be enabled in settings to use this"));
+             return 1;
+         }
+         String finalInnerDir = innerDir;
+@@ -231,10 +248,10 @@
+         return 1;
+     }
+ 
+-    private static int cancelImport(CommandContext<FabricClientCommandSource> ctx) {
++    private static int cancelImport(CommandContext<CommandSourceStack> ctx) {
+         var instance = (VoxyClientInstance)VoxyCommon.getInstance();
+         if (instance == null) {
+-            ctx.getSource().sendError(Component.translatable("Voxy must be enabled in settings to use this"));
++            ctx.getSource().sendFailure(Component.translatable("Voxy must be enabled in settings to use this"));
+             return 1;
+         }
+         var world = WorldIdentifier.ofEngineNullable(Minecraft.getInstance().level);
+Index: src/main/java/me/cortex/voxy/client/VoxyClient.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/VoxyClient.java b/src/main/java/me/cortex/voxy/client/VoxyClient.java
+--- a/src/main/java/me/cortex/voxy/client/VoxyClient.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/VoxyClient.java	(date 1766486280524)
+@@ -5,16 +5,16 @@
+ import me.cortex.voxy.client.core.rendering.util.SharedIndexBuffer;
+ import me.cortex.voxy.common.Logger;
+ import me.cortex.voxy.commonImpl.VoxyCommon;
+-import net.fabricmc.api.ClientModInitializer;
+-import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+-import net.fabricmc.loader.api.FabricLoader;
+-// import net.minecraft.client.gui.components.debug.DebugScreenEntries;
+-import net.minecraft.resources.ResourceLocation;
++import me.cortex.voxy.NeoVoxyMod;
++import net.neoforged.api.distmarker.Dist;
++import net.neoforged.api.distmarker.OnlyIn;
++import net.neoforged.bus.api.SubscribeEvent;
++import net.neoforged.fml.common.Mod;
++import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
++import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
+ import java.util.HashSet;
+-import java.util.function.Consumer;
+-import java.util.function.Function;
+ 
+-public class VoxyClient implements ClientModInitializer {
++public class VoxyClient {
+     private static final HashSet<String> FREX = new HashSet<>();
+ 
+     public static void initVoxyClient() {
+@@ -37,23 +37,11 @@
+         }
+     }
+ 
+-    @Override
+-    public void onInitializeClient() {
+-        // DebugScreenEntries.register(ResourceLocation.fromNamespaceAndPath("voxy","debug"), new VoxyDebugScreenEntry());
+-        ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
+-            if (VoxyCommon.isAvailable()) {
+-                dispatcher.register(VoxyCommands.register());
+-            }
+-        });
++    public static void onInitializeClientNeoForge() {
++        // NeoForge client initialization
++    }
+ 
+-        FabricLoader.getInstance()
+-                .getEntrypoints("frex_flawless_frames", Consumer.class)
+-                .forEach(api -> ((Consumer<Function<String,Consumer<Boolean>>>)api).accept(name->active->{if (active) {
+-                    FREX.add(name);
+-                } else {
+-                    FREX.remove(name);
+-                }}));
+-    }
++    // Command registration is handled in NeoVoxyMod.java
+ 
+     public static boolean isFrexActive() {
+         return !FREX.isEmpty();
+Index: src/main/java/me/cortex/voxy/client/core/gl/shader/ShaderLoader.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/me/cortex/voxy/client/core/gl/shader/ShaderLoader.java b/src/main/java/me/cortex/voxy/client/core/gl/shader/ShaderLoader.java
+--- a/src/main/java/me/cortex/voxy/client/core/gl/shader/ShaderLoader.java	(revision 9dbb8174fda9aa94dbc8d5864f161588c08c3c7d)
++++ b/src/main/java/me/cortex/voxy/client/core/gl/shader/ShaderLoader.java	(date 1766725725018)
+@@ -1,12 +1,82 @@
+ package me.cortex.voxy.client.core.gl.shader;
+ 
+-
+ import net.caffeinemc.mods.sodium.client.gl.shader.ShaderConstants;
+ import net.caffeinemc.mods.sodium.client.gl.shader.ShaderParser;
+ 
++import java.io.InputStream;
++import java.util.Scanner;
++
+ public class ShaderLoader {
+     public static String parse(String id) {
+-        return "#version 460 core\n"+ShaderParser.parseShader("\n#import <" + id + ">\n//beans", ShaderConstants.builder().build()).replaceAll("\r\n", "\n").replaceFirst("\n#version .+\n", "\n");
+-        //return me.jellysquid.mods.sodium.client.gl.shader.ShaderLoader.getShaderSource(new Identifier(id));
++        // 直接读取并预处理shader文件，替换所有#import指令
++        String source = getShaderSource(id);
++        source = preprocessShaderImports(source, id);
++        
++        return "#version 460 core\n" + 
++               ShaderParser.parseShader("\n" + source + "\n//beans", ShaderConstants.builder().build())
++               .replaceAll("\r\n", "\n")
++               .replaceFirst("\n#version .+\n", "\n");
++    }
++    
++    // 预处理shader文件，替换所有#import指令
++    private static String preprocessShaderImports(String source, String baseId) {
++        StringBuilder result = new StringBuilder();
++        String[] lines = source.split("\n");
++        
++        for (String line : lines) {
++            if (line.trim().startsWith("#import")) {
++                // 提取导入的shader路径
++                String importPath = line.trim().replace("#import <", "").replace(">", "").trim();
++                // 递归加载导入的shader
++                String importedSource = getShaderSource(importPath);
++                // 预处理导入的shader
++                importedSource = preprocessShaderImports(importedSource, importPath);
++                // 添加到结果中
++                result.append(importedSource).append("\n");
++            } else {
++                // 保留其他行
++                result.append(line).append("\n");
++            }
++        }
++        
++        return result.toString();
++    }
++    
++    // 读取shader文件内容
++    private static String getShaderSource(String id) {
++        try {
++            String resourcePath;
++            
++            // 如果是完整路径，直接使用
++            if (id.startsWith("/assets/")) {
++                resourcePath = id;
++            } else {
++                // 解析id为namespace和path
++                int colonIndex = id.indexOf(':');
++                if (colonIndex == -1) {
++                    // 假设是voxy命名空间下的相对路径
++                    resourcePath = "/assets/voxy/shaders/" + id;
++                } else {
++                    String namespace = id.substring(0, colonIndex);
++                    String path = id.substring(colonIndex + 1);
++                    resourcePath = "/assets/" + namespace + "/shaders/" + path;
++                }
++            }
++            
++            // 使用类加载器读取资源
++            InputStream is = ShaderLoader.class.getResourceAsStream(resourcePath);
++            if (is == null) {
++                throw new RuntimeException("Shader not found: " + resourcePath);
++            }
++            
++            Scanner scanner = new Scanner(is).useDelimiter("\\A");
++            String content = scanner.hasNext() ? scanner.next() : "";
++            scanner.close();
++            is.close();
++            
++            return content;
++        } catch (Exception e) {
++            throw new RuntimeException("Failed to load shader: " + id, e);
++        }
+     }
+ }
